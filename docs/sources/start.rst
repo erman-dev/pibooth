@@ -55,6 +55,24 @@ Select option           UP or DOWN       Button 1              Tap 1 finger
 Change option value     LEFT or RIGHT    Button 2              Tap 1 finger
 ======================= ================ ===================== =====================
 
+Interface hints and fonts
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The interface displays text guidance instead of graphic arrows. You can tailor the
+messages to match your setup by editing the ``[WINDOW][arrows]`` option in the
+configuration file. Available values are ``bottom`` or ``top`` (for physical
+buttons), ``touchscreen`` (for a touch-first booth), or ``hidden`` to disable the
+hints entirely. ``[WINDOW][arrows_x_offset]`` lets you nudge the hints sideways so
+they line up with your hardware buttons.
+
+To tweak the phrasing, add entries such as ``instruction_continue_bottom`` or
+``instruction_select_touchscreen`` to your translation file (see :ref:`GUI translations<GUI translations>`).
+
+The font used for every on-screen label is controlled by ``[WINDOW][font]``.
+Set it to the name of one of the bundled fonts (see ``pibooth/fonts``), a system
+font recognised by ``pygame`` (for example ``Arial``), or the absolute path to a
+``.ttf`` file you install yourself.
+
 Configure
 ---------
 
@@ -99,8 +117,10 @@ The ``pibooth`` application handle the rendering of the final picture using 2
 variables defined in the configuration (see :ref:`Configure` below):
 
 * ``[CAMERA][resolution] = (width, height)`` is the resolution of the captured
-  picture in pixels. As explained in the configuration file, the preview size is
-  directly dependent from this parameter.
+  picture in pixels.
+* ``[CAMERA][preview_resolution] = (width, height)`` optionally controls the
+  resolution of the live preview. When left empty, the preview keeps the same
+  aspect ratio as the capture resolution.
 * ``[PICTURE][orientation] = auto/landscape/portrait`` is the orientation of the
   final picture (after concatenation of all captures). If the value is **auto**,
   the orientation is automatically chosen depending on the resolution.

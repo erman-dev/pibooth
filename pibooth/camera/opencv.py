@@ -64,7 +64,17 @@ class CvCamera(BaseCamera):
     def _specific_initialization(self):
         """Camera initialization.
         """
-        self._preview_resolution = (self._cam.get(cv2.CAP_PROP_FRAME_WIDTH), self._cam.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        current = (int(self._cam.get(cv2.CAP_PROP_FRAME_WIDTH)), int(self._cam.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+        LOGGER.debug("Initial camera preview resolution is %s", current)
+        if self.preview_resolution:
+            desired = self.preview_resolution
+            self._cam.set(cv2.CAP_PROP_FRAME_WIDTH, desired[0])
+            self._cam.set(cv2.CAP_PROP_FRAME_HEIGHT, desired[1])
+            current = (int(self._cam.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                       int(self._cam.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+            if current != tuple(desired):
+                LOGGER.warning("Requested preview resolution %s but camera reported %s", desired, current)
+        self._preview_resolution = current
         LOGGER.debug("Preview resolution is %s", self._preview_resolution)
         self._cam.set(cv2.CAP_PROP_ISO_SPEED, self.preview_iso)
 
@@ -104,7 +114,7 @@ class CvCamera(BaseCamera):
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         # Crop to keep aspect ratio of the resolution
         height, width = image.shape[:2]
-        cropped = sizing.new_size_by_croping_ratio((width, height), self.resolution)
+        cropped = sizing.new_size_by_croping_ratio((width, height), self.preview_resolution)
         image = image[cropped[1]:cropped[3], cropped[0]:cropped[2]]
         # Resize to fit the available space in the window
         height, width = image.shape[:2]
@@ -132,11 +142,11 @@ class CvCamera(BaseCamera):
         image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         # Crop to keep aspect ratio of the resolution
         height, width = image.shape[:2]
-        cropped = sizing.new_size_by_croping_ratio((width, height), self.resolution)
+        cropped = sizing.new_size_by_croping_ratio((width, height), self.capture_resolution)
         image = image[cropped[1]:cropped[3], cropped[0]:cropped[2]]
         # Resize to fit the resolution
         height, width = image.shape[:2]
-        size = sizing.new_size_keep_aspect_ratio((width, height), self.resolution, 'outer')
+        size = sizing.new_size_keep_aspect_ratio((width, height), self.capture_resolution, 'outer')
         image = cv2.resize(image, size, interpolation=cv2.INTER_AREA)
 
         if self.capture_flip:
@@ -208,13 +218,13 @@ class CvCamera(BaseCamera):
         if effect not in self.IMAGE_EFFECTS:
             raise ValueError("Invalid capture effect '{}' (choose among {})".format(effect, self.IMAGE_EFFECTS))
 
-        self._cam.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
-        self._cam.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
+        self._cam.set(cv2.CAP_PROP_FRAME_WIDTH, self.capture_resolution[0])
+        self._cam.set(cv2.CAP_PROP_FRAME_HEIGHT, self.capture_resolution[1])
 
         if self.capture_iso != self.preview_iso:
             self._cam.set(cv2.CAP_PROP_ISO_SPEED, self.capture_iso)
 
-        LOGGER.debug("Taking capture at resolution %s", self.resolution)
+        LOGGER.debug("Taking capture at resolution %s", self.capture_resolution)
         ret, image = self._cam.read()
         if not ret:
             raise IOError("Can not capture frame")

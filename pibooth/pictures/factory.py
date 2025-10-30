@@ -7,6 +7,11 @@ from pibooth.utils import LOGGER
 from pibooth.pictures import sizing
 from PIL import Image, ImageDraw
 
+try:  # Pillow >=9.1
+    Resampling = Image.Resampling
+except AttributeError:  # pragma: no cover - legacy Pillow fallback
+    Resampling = Image
+
 try:
     import cv2
     import numpy as np
@@ -395,11 +400,11 @@ class PilPictureFactory(PictureFactory):
         """
         if crop:
             width, height = sizing.new_size_keep_aspect_ratio(image.size, (max_w, max_h), 'outer')
-            image = image.resize((width, height), Image.ANTIALIAS)
+            image = image.resize((width, height), Resampling.LANCZOS)
             image = image.crop(sizing.new_size_by_croping(image.size, (max_w, max_h)))
         else:
             width, height = sizing.new_size_keep_aspect_ratio(image.size, (max_w, max_h), 'inner')
-            image = image.resize((width, height), Image.ANTIALIAS)
+            image = image.resize((width, height), Resampling.LANCZOS)
         return image, image.size[0], image.size[1]
 
     def _image_paste(self, image, dest_image, pos_x, pos_y):

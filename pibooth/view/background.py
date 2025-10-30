@@ -12,6 +12,52 @@ ARROW_HIDDEN = 'hidden'
 ARROW_TOUCH = 'touchscreen'
 
 
+INSTRUCTION_DEFAULTS = {
+    'continue': {
+        ARROW_BOTTOM: "Press the bottom button to continue",
+        ARROW_TOP: "Press the top button to continue",
+        ARROW_TOUCH: "Tap the screen to continue",
+    },
+    'print': {
+        ARROW_BOTTOM: "Press the bottom button to print",
+        ARROW_TOP: "Press the top button to print",
+        ARROW_TOUCH: "Tap to start printing",
+    },
+    'skip_print': {
+        ARROW_BOTTOM: "Press the bottom button to skip printing",
+        ARROW_TOP: "Press the top button to skip printing",
+        ARROW_TOUCH: "Tap Skip to skip printing",
+    },
+    'select': {
+        ARROW_BOTTOM: "Press the buttons to choose this option",
+        ARROW_TOP: "Press the buttons to choose this option",
+        ARROW_TOUCH: "Tap to choose this option",
+    },
+}
+
+
+def _mix_colors(base, accent, ratio):
+    """Return the color obtained by mixing ``base`` and ``accent``."""
+
+    ratio = max(0.0, min(float(ratio), 1.0))
+    return tuple(
+        int(round(base[i] + (accent[i] - base[i]) * ratio))
+        for i in range(3)
+    )
+
+
+def get_instruction_text(purpose, location):
+    """Return a translated instruction text for the given purpose/location."""
+    if location == ARROW_HIDDEN:
+        return None
+
+    key = f"instruction_{purpose}_{location}"
+    text = get_translated_text(key)
+    if text:
+        return text
+    return INSTRUCTION_DEFAULTS.get(purpose, {}).get(location)
+
+
 def multiline_text_to_surfaces(text, color, rect, align='center'):
     """Return a list of surfaces corresponding to each line of the text.
     The surfaces are next to each others in order to fit the given rect.
@@ -72,12 +118,19 @@ class Background(object):
         self._overlay = None
 
         self._texts = []  # List of (surface, rect)
+        self._instructions = []  # List of (surface, rect)
+        self._text_panels = []  # List of (surface, rect)
+        self._instruction_panels = []  # List of (surface, rect)
         self._text_border = 20  # Distance to other elements
         self._text_color = text_color
 
         # Build rectangles around some areas for debuging purpose
-        self._show_outlines = True
+        self._show_outlines = False
         self._outlines = []
+
+        self._panel_padding = 40
+        self._panel_radius = 28
+        self._panel_alpha = 180
 
     def __str__(self):
         """Return background final name.
@@ -101,7 +154,64 @@ class Background(object):
             rect = self._rect.inflate(-self._text_border, -self._text_border)
         if self._show_outlines:
             self._outlines.append((self._make_outlines(rect.size), rect))
-        self._texts.extend(multiline_text_to_surfaces(text, self._text_color, rect, align))
+        surfaces = multiline_text_to_surfaces(text, self._text_color, rect, align)
+        self._record_text_block(surfaces, rect, self._text_panels, emphasis=False)
+        self._texts.extend(surfaces)
+
+    def _record_text_block(self, surfaces, container_rect, panel_list, emphasis=False):
+        if not surfaces:
+            return
+
+        block_rect = surfaces[0][1].copy()
+        for _, surface_rect in surfaces[1:]:
+            block_rect.union_ip(surface_rect)
+
+        if self._rect:
+            left_room = max(0, block_rect.left - self._rect.left)
+            right_room = max(0, self._rect.right - block_rect.right)
+            top_room = max(0, block_rect.top - self._rect.top)
+            bottom_room = max(0, self._rect.bottom - block_rect.bottom)
+        else:
+            left_room = right_room = top_room = bottom_room = self._panel_padding
+
+        left_pad = min(self._panel_padding, left_room)
+        right_pad = min(self._panel_padding, right_room)
+        top_pad = min(self._panel_padding, top_room)
+        bottom_pad = min(self._panel_padding, bottom_room)
+
+        expanded = pygame.Rect(
+            block_rect.left - left_pad,
+            block_rect.top - top_pad,
+            block_rect.width + left_pad + right_pad,
+            block_rect.height + top_pad + bottom_pad,
+        )
+
+        panel_surface = self._build_panel_surface(expanded.size, emphasis)
+        panel_list.append((panel_surface, expanded.topleft))
+
+    def _add_instruction_text(self, text, rect, align):
+        surfaces = multiline_text_to_surfaces(text, self._text_color, rect, align)
+        self._record_text_block(surfaces, rect, self._instruction_panels, emphasis=True)
+        self._instructions.extend(surfaces)
+
+    def _build_panel_surface(self, size, emphasis=False):
+        fill_ratio = 0.30 if emphasis else 0.22
+        border_ratio = 0.45 if emphasis else 0.35
+
+        fill_rgb = _mix_colors(self._background_color, self._text_color, fill_ratio)
+        border_rgb = _mix_colors(self._background_color, self._text_color, border_ratio)
+
+        panel = pygame.Surface(size, pygame.SRCALPHA)
+        rect = panel.get_rect()
+
+        fill_color = (*fill_rgb, self._panel_alpha)
+        border_alpha = min(255, int(self._panel_alpha * 0.85))
+        border_color = (*border_rgb, border_alpha)
+
+        pygame.draw.rect(panel, fill_color, rect, border_radius=self._panel_radius)
+        pygame.draw.rect(panel, border_color, rect, width=2, border_radius=self._panel_radius)
+
+        return panel
 
     def set_color(self, color_or_path):
         """Set background color (RGB tuple) or path to an image that used to
@@ -173,6 +283,9 @@ class Background(object):
         """Update text surfaces.
         """
         self._texts = []
+        self._instructions = []
+        self._text_panels = []
+        self._instruction_panels = []
         text = get_translated_text(self._name)
         if text:
             self._write_text(text, rect, align)
@@ -186,7 +299,13 @@ class Background(object):
             screen.fill(self._background_color)
         if self._overlay:
             screen.blit(self._overlay, self._overlay.get_rect(center=self._rect.center))
+        for panel_surface, pos in self._text_panels:
+            screen.blit(panel_surface, pos)
+        for panel_surface, pos in self._instruction_panels:
+            screen.blit(panel_surface, pos)
         for text_surface, pos in self._texts:
+            screen.blit(text_surface, pos)
+        for text_surface, pos in self._instructions:
             screen.blit(text_surface, pos)
         for outline_surface, pos in self._outlines:
             screen.blit(outline_surface, pos)
@@ -199,33 +318,65 @@ class IntroBackground(Background):
         Background.__init__(self, "intro")
         self.arrow_location = arrow_location
         self.arrow_offset = arrow_offset
-        self.left_arrow = None
-        self.left_arrow_pos = None
+
+    def _get_instruction_area(self):
+        width = int(self._rect.width * 0.35)
+        height = int(self._rect.height * 0.22)
+        rect = pygame.Rect(0, 0, width, height)
+
+        if self.arrow_location == ARROW_TOUCH:
+            rect.center = (int(self._rect.width * 0.22) - self.arrow_offset,
+                           int(self._rect.height * 0.5))
+            align = 'center'
+        elif self.arrow_location == ARROW_TOP:
+            rect.centerx = int(self._rect.width * 0.25) - self.arrow_offset
+            rect.top = int(self._rect.top + self._rect.height * 0.05)
+            align = 'top-center'
+        else:
+            rect.centerx = int(self._rect.width * 0.25) - self.arrow_offset
+            rect.bottom = int(self._rect.bottom - self._rect.height * 0.05)
+            align = 'bottom-center'
+
+        return rect, align
 
     def resize(self, screen):
         Background.resize(self, screen)
-        if self._need_update and self.arrow_location != ARROW_HIDDEN:
-            if self.arrow_location == ARROW_TOUCH:
-                size = (self._rect.width * 0.2, self._rect.height * 0.2)
+        if self._need_update:
+            self._build_print_instructions()
 
-                self.left_arrow = pictures.get_pygame_image("camera.png", size, vflip=False, color=self._text_color)
+    def _build_print_instructions(self):
+        if self.arrow_location == ARROW_HIDDEN:
+            return
 
-                x = int(self._rect.width * 0.2)
-                y = int(self._rect.height // 2)
-            else:
-                size = (self._rect.width * 0.3, self._rect.height * 0.3)
+        confirm_text = get_instruction_text('print', self.arrow_location)
+        skip_text = get_instruction_text('skip_print', self.arrow_location)
+        if not confirm_text and not skip_text:
+            return
 
-                vflip = True if self.arrow_location == ARROW_TOP else False
-                self.left_arrow = pictures.get_pygame_image("arrow.png", size, vflip=vflip, color=self._text_color)
+        right_rect = pygame.Rect(0, 0, int(self._rect.width * 0.28),
+                                 int(self._rect.height * 0.2))
+        left_rect = pygame.Rect(0, 0, int(self._rect.width * 0.28),
+                                int(self._rect.height * 0.18))
 
-                x = int(self._rect.left + self._rect.width // 4
-                        - self.left_arrow.get_rect().width // 2)
-                if self.arrow_location == ARROW_TOP:
-                    y = self._rect.top + 10
-                else:
-                    y = int(self._rect.top + 2 * self._rect.height // 3)
+        if self.arrow_location == ARROW_TOP:
+            right_rect.centerx = int(self._rect.width * 0.75) + self.arrow_offset
+            right_rect.top = int(self._rect.top + self._text_border)
+            right_align = 'top-center'
+            left_rect.centerx = int(self._rect.width * 0.5) - self.arrow_offset
+            left_rect.top = int(self._rect.top + self._text_border)
+            left_align = 'top-center'
+        else:
+            right_rect.centerx = int(self._rect.width * 0.75) + self.arrow_offset
+            right_rect.bottom = int(self._rect.bottom - self._text_border)
+            right_align = 'bottom-center'
+            left_rect.centerx = int(self._rect.width * 0.5) - self.arrow_offset
+            left_rect.bottom = int(self._rect.bottom - self._text_border)
+            left_align = 'bottom-center'
 
-            self.left_arrow_pos = (x - self.arrow_offset, y)
+        if confirm_text:
+            self._add_instruction_text(confirm_text, right_rect, right_align)
+        if skip_text:
+            self._add_instruction_text(skip_text, left_rect, left_align)
 
     def resize_texts(self):
         """Update text surfaces.
@@ -251,19 +402,17 @@ class IntroBackground(Background):
                                self._rect.height * 0.6 - self._text_border)
             align = 'top-center'
         Background.resize_texts(self, rect, align)
-
-    def paint(self, screen):
-        Background.paint(self, screen)
         if self.arrow_location != ARROW_HIDDEN:
-            screen.blit(self.left_arrow, self.left_arrow_pos)
+            instruction = get_instruction_text('continue', self.arrow_location)
+            if instruction:
+                rect, align = self._get_instruction_area()
+                self._add_instruction_text(instruction, rect, align)
 
 
 class IntroWithPrintBackground(IntroBackground):
 
     def __init__(self, arrow_location=ARROW_BOTTOM, arrow_offset=0):
         IntroBackground.__init__(self, arrow_location, arrow_offset)
-        self.right_arrow = None
-        self.right_arrow_pos = None
 
     def __str__(self):
         """Return background final name.
@@ -273,26 +422,25 @@ class IntroWithPrintBackground(IntroBackground):
         """
         return "{}({})".format(self.__class__.__name__, "intro_print")
 
-    def resize(self, screen):
-        IntroBackground.resize(self, screen)
-        if self._need_update and self.arrow_location != ARROW_HIDDEN:
-            size = (self._rect.width * 0.1, self._rect.height * 0.1)
-            if self.arrow_location == ARROW_TOUCH:
-                self.right_arrow = pictures.get_pygame_image("hand.png", size, hflip=False,
-                                                             vflip=False, angle=-70, color=self._text_color)
-            else:
-                vflip = True if self.arrow_location == ARROW_TOP else False
-                angle = -70 if self.arrow_location == ARROW_TOP else 70
-                self.right_arrow = pictures.get_pygame_image("arrow.png", size, hflip=False,
-                                                             vflip=vflip, angle=angle, color=self._text_color)
+    def _get_print_instruction_area(self):
+        width = int(self._rect.width * 0.30)
+        height = int(self._rect.height * 0.22)
+        rect = pygame.Rect(0, 0, width, height)
 
-            x = int(self._rect.left + self._rect.width // 2
-                    - self.right_arrow.get_rect().width // 2)
-            if self.arrow_location == ARROW_TOP:
-                y = self._rect.top + 10
-            else:
-                y = int(self._rect.bottom - self.right_arrow.get_rect().height * 1.1)
-            self.right_arrow_pos = (x - self.arrow_offset, y)
+        if self.arrow_location == ARROW_TOUCH:
+            rect.center = (int(self._rect.width * 0.75) + self.arrow_offset,
+                           int(self._rect.height * 0.5))
+            align = 'center'
+        elif self.arrow_location == ARROW_TOP:
+            rect.centerx = int(self._rect.width * 0.75) + self.arrow_offset
+            rect.top = int(self._rect.top + self._rect.height * 0.05)
+            align = 'top-center'
+        else:
+            rect.centerx = int(self._rect.width * 0.75) + self.arrow_offset
+            rect.bottom = int(self._rect.bottom - self._rect.height * 0.05)
+            align = 'bottom-center'
+
+        return rect, align
 
     def resize_texts(self):
         """Update text surfaces.
@@ -308,11 +456,11 @@ class IntroWithPrintBackground(IntroBackground):
             else:
                 rect.bottom = self._rect.height - self._rect.height * 0.08
             self._write_text(text, rect)
-
-    def paint(self, screen):
-        IntroBackground.paint(self, screen)
         if self.arrow_location != ARROW_HIDDEN:
-            screen.blit(self.right_arrow, self.right_arrow_pos)
+            instruction = get_instruction_text('print', self.arrow_location)
+            if instruction:
+                rect, align = self._get_print_instruction_area()
+                self._add_instruction_text(instruction, rect, align)
 
 
 class ChooseBackground(Background):
@@ -326,10 +474,7 @@ class ChooseBackground(Background):
         self.layout0_pos = None
         self.layout1 = None
         self.layout1_pos = None
-        self.left_arrow = None
-        self.left_arrow_pos = None
-        self.right_arrow = None
-        self.right_arrow_pos = None
+        self.choice_panels = []
 
     def resize(self, screen):
         Background.resize(self, screen)
@@ -348,30 +493,42 @@ class ChooseBackground(Background):
 
             self.layout0_pos = (x0, y)
             self.layout1_pos = (x1, y)
+            self.choice_panels = []
 
-            if self.arrow_location in [ARROW_TOP, ARROW_BOTTOM]:
-                if self.arrow_location == ARROW_TOP:
-                    y = 5
-                    x_offset = 30
-                    size = (self._rect.width * 0.1, self._rect.top + y + 30)
-                else:
-                    x_offset = 0
-                    y = self.layout0_pos[1] + self.layout0.get_rect().height + 5
-                    size = (self._rect.width * 0.1, self._rect.bottom - y - 5)
+            padding = int(min(self.layout0.get_width(), self.layout0.get_height()) * 0.08)
+            layout_rect0 = self.layout0.get_rect(topleft=self.layout0_pos).inflate(padding, padding)
+            layout_rect1 = self.layout1.get_rect(topleft=self.layout1_pos).inflate(padding, padding)
+            self.choice_panels.append((self._build_panel_surface(layout_rect0.size, emphasis=True), layout_rect0.topleft))
+            self.choice_panels.append((self._build_panel_surface(layout_rect1.size, emphasis=True), layout_rect1.topleft))
+            self._build_choice_instructions()
 
-                vflip = True if self.arrow_location == ARROW_TOP else False
-                self.left_arrow = pictures.get_pygame_image("arrow.png", size, vflip=vflip,
-                                                            color=self._text_color)
-                self.right_arrow = pictures.get_pygame_image("arrow.png", size, hflip=True,
-                                                             vflip=vflip, color=self._text_color)
+    def _build_choice_instructions(self):
+        if self.arrow_location == ARROW_HIDDEN:
+            return
 
-                inter = (self._rect.width - 2 * self.left_arrow.get_rect().width) // 4
+        instruction = get_instruction_text('select', self.arrow_location)
+        if not instruction or not self.layout0 or not self.layout1:
+            return
 
-                x0 = int(self._rect.left + inter) - x_offset
-                x1 = int(self._rect.left + 3 * inter + self.left_arrow.get_rect().width) + x_offset
+        layout_rects = [
+            self.layout0.get_rect(topleft=self.layout0_pos),
+            self.layout1.get_rect(topleft=self.layout1_pos)
+        ]
+        offsets = [-self.arrow_offset, self.arrow_offset]
 
-                self.left_arrow_pos = (x0 - self.arrow_offset, y)
-                self.right_arrow_pos = (x1 + self.arrow_offset, y)
+        for rect, offset in zip(layout_rects, offsets):
+            hint_rect = pygame.Rect(0, 0, int(rect.width * 0.8),
+                                    int(self._rect.height * 0.12))
+            if self.arrow_location == ARROW_TOP:
+                hint_rect.centerx = rect.centerx + offset
+                hint_rect.bottom = max(rect.top - self._text_border, hint_rect.height)
+                align = 'bottom-center'
+            else:  # bottom and touchscreen are rendered below the layout
+                hint_rect.centerx = rect.centerx + offset
+                hint_rect.top = rect.bottom + self._text_border
+                align = 'top-center'
+
+            self._add_instruction_text(instruction, hint_rect, align)
 
     def resize_texts(self):
         """Update text surfaces.
@@ -382,11 +539,10 @@ class ChooseBackground(Background):
 
     def paint(self, screen):
         Background.paint(self, screen)
+        for panel, pos in self.choice_panels:
+            screen.blit(panel, pos)
         screen.blit(self.layout0, self.layout0_pos)
         screen.blit(self.layout1, self.layout1_pos)
-        if self.arrow_location in [ARROW_TOP, ARROW_BOTTOM]:
-            screen.blit(self.left_arrow, self.left_arrow_pos)
-            screen.blit(self.right_arrow, self.right_arrow_pos)
 
 
 class ChosenBackground(Background):
@@ -484,62 +640,45 @@ class PrintBackground(Background):
         Background.__init__(self, "print")
         self.arrow_location = arrow_location
         self.arrow_offset = arrow_offset
-        self.right_arrow = None
-        self.right_arrow_pos = None
-        self.left_arrow = None
-        self.left_arrow_pos = None
 
     def resize(self, screen):
         Background.resize(self, screen)
-        if self._need_update and self.arrow_location != ARROW_HIDDEN:
+        if self._need_update:
+            self._build_print_instructions()
 
-            if self.arrow_location == ARROW_TOUCH:
-                size = (self._rect.width // 4, self._rect.height // 4)
-                # Right arrow
-                self.right_arrow = pictures.get_pygame_image(
-                    "printer_touch.png", size, hflip=False, vflip=False, color=self._text_color)
-                x = int(self._rect.left + self._rect.width * 0.70
-                        - self.right_arrow.get_rect().width // 2)
-                y = int(self._rect.top + self._rect.height * 0.45)
-            else:
-                size = (self._rect.width * 0.3, self._rect.height * 0.3)
+    def _build_print_instructions(self):
+        if self.arrow_location == ARROW_HIDDEN:
+            return
 
-                vflip = True if self.arrow_location == ARROW_TOP else False
+        confirm_text = get_instruction_text('print', self.arrow_location)
+        skip_text = get_instruction_text('skip_print', self.arrow_location)
+        if not confirm_text and not skip_text:
+            return
 
-                # Right arrow
-                self.right_arrow = pictures.get_pygame_image(
-                    "arrow.png", size, hflip=True, vflip=vflip, color=self._text_color)
+        right_rect = pygame.Rect(0, 0, int(self._rect.width * 0.28),
+                                 int(self._rect.height * 0.2))
+        left_rect = pygame.Rect(0, 0, int(self._rect.width * 0.28),
+                                int(self._rect.height * 0.18))
 
-                x = int(self._rect.left + self._rect.width * 0.75
-                        - self.right_arrow.get_rect().width // 2)
-                if self.arrow_location == ARROW_TOP:
-                    y = self._rect.top + 10
-                else:
-                    y = int(self._rect.top + 2 * self._rect.height // 3)
+        if self.arrow_location == ARROW_TOP:
+            right_rect.centerx = int(self._rect.width * 0.75) + self.arrow_offset
+            right_rect.top = int(self._rect.top + self._text_border)
+            right_align = 'top-center'
+            left_rect.centerx = int(self._rect.width * 0.5) - self.arrow_offset
+            left_rect.top = int(self._rect.top + self._text_border)
+            left_align = 'top-center'
+        else:
+            right_rect.centerx = int(self._rect.width * 0.75) + self.arrow_offset
+            right_rect.bottom = int(self._rect.bottom - self._text_border)
+            right_align = 'bottom-center'
+            left_rect.centerx = int(self._rect.width * 0.5) - self.arrow_offset
+            left_rect.bottom = int(self._rect.bottom - self._text_border)
+            left_align = 'bottom-center'
 
-            self.right_arrow_pos = (x + self.arrow_offset, y)
-
-            # Left arrow
-            size = (self._rect.width * 0.1, self._rect.height * 0.1)
-
-            if self.arrow_location == ARROW_TOUCH:
-                self.left_arrow = pictures.get_pygame_image(
-                    "hand.png", size, hflip=False, vflip=False, angle=70, color=self._text_color)
-            else:
-                vflip = True if self.arrow_location == ARROW_TOP else False
-                angle = 70 if self.arrow_location == ARROW_TOP else -70
-                self.left_arrow = pictures.get_pygame_image(
-                    "arrow.png", size, hflip=False, vflip=vflip, angle=angle, color=self._text_color)
-
-            x = int(self._rect.left + self._rect.width // 2
-                    - self.left_arrow.get_rect().width // 2)
-
-            if self.arrow_location == ARROW_TOP:
-                y = self._rect.top + 10
-            else:
-                y = int(self._rect.bottom - self.left_arrow.get_rect().height * 1.1)
-
-            self.left_arrow_pos = (x - self.arrow_offset, y)
+        if confirm_text:
+            self._add_instruction_text(confirm_text, right_rect, right_align)
+        if skip_text:
+            self._add_instruction_text(skip_text, left_rect, left_align)
 
     def resize_texts(self):
         """Update text surfaces.
@@ -577,12 +716,6 @@ class PrintBackground(Background):
                 rect.bottom = self._rect.height - self._rect.height * 0.08
 
             self._write_text(text, rect)
-
-    def paint(self, screen):
-        Background.paint(self, screen)
-        if self.arrow_location != ARROW_HIDDEN:
-            screen.blit(self.right_arrow, self.right_arrow_pos)
-            screen.blit(self.left_arrow, self.left_arrow_pos)
 
 
 class FinishedBackground(Background):

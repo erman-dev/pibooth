@@ -27,11 +27,20 @@ class CameraPlugin(object):
             LOGGER.debug("Fallback to pibooth default camera management system")
             cam = camera.find_camera()
 
+        preview_resolution = cfg.gettuple('CAMERA', 'preview_resolution', int)
+        if len(preview_resolution) == 0:
+            preview_resolution = None
+        elif len(preview_resolution) != 2:
+            raise ValueError("Invalid config value [CAMERA][preview_resolution]={}".format(preview_resolution))
+        else:
+            preview_resolution = tuple(int(v) for v in preview_resolution[:2])
+
         cam.initialize(cfg.gettuple('CAMERA', 'iso', (int, str), 2),
                        cfg.gettyped('CAMERA', 'resolution'),
-                       cfg.gettuple('CAMERA', 'rotation', int, 2),
-                       cfg.getboolean('CAMERA', 'flip'),
-                       cfg.getboolean('CAMERA', 'delete_internal_memory'))
+                       preview_resolution=preview_resolution,
+                       rotation=cfg.gettuple('CAMERA', 'rotation', int, 2),
+                       flip=cfg.getboolean('CAMERA', 'flip'),
+                       delete_internal_memory=cfg.getboolean('CAMERA', 'delete_internal_memory'))
         outcome.force_result(cam)
 
     @pibooth.hookimpl
