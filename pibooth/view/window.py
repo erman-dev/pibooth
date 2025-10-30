@@ -109,7 +109,7 @@ class PiWindow(object):
                 )
             else:
                 image = pil_image
-            image = pygame.image.frombuffer(image.tobytes(), image.size, image.mode)
+            image = pictures.pil_to_pygame_surface(image)
             if self._current_foreground:
                 self._buffered_images.pop(id(self._current_foreground[0]), None)
             LOGGER.debug("Add to buffer the image '%s'", image_name)

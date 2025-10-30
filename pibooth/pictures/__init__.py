@@ -31,6 +31,26 @@ def get_filename(name):
     return osp.join(osp.dirname(osp.abspath(__file__)), 'assets', name)
 
 
+def pil_to_pygame_surface(pil_image):
+    """Return a pygame surface for the given PIL image.
+
+    Pillow 10 switched the default pixel formats used during resize/color
+    operations and pygame 2.5+ is stricter about the declared buffer format
+    when blitting from Python-managed memory.  Converting explicitly to an
+    RGB/RGBA representation and then copying the pixels into a surface keeps
+    the sprites visible on screen.
+    """
+    has_alpha = 'A' in pil_image.getbands()
+    target_mode = 'RGBA' if has_alpha else 'RGB'
+    if pil_image.mode != target_mode:
+        pil_image = pil_image.convert(target_mode)
+
+    surface = pygame.image.frombuffer(pil_image.tobytes(), pil_image.size, target_mode)
+    if pygame.display.get_init():
+        return surface.convert_alpha() if has_alpha else surface.convert()
+    return surface
+
+
 def colorize_pil_image(pil_image, color, bg_color=None):
     """Convert a picto in white to the corresponding color.
 
@@ -103,7 +123,7 @@ def get_pygame_image(name, size=None, antialiasing=True, hflip=False, vflip=Fals
             Resampling.LANCZOS if antialiasing else Resampling.NEAREST
         )
 
-        image = pygame.image.frombuffer(pil_image.tobytes(), pil_image.size, pil_image.mode)
+        image = pil_to_pygame_surface(pil_image)
 
     if hflip or vflip:
         image = pygame.transform.flip(image, hflip, vflip)
