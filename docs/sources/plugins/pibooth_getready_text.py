@@ -31,7 +31,7 @@ def state_wait_exit(win):
     win.surface.blit(text_surface, text_surface.get_rect(center=win_rect.center).topleft)
 
     # Force screen update and events process
-    win.present()
+    pygame.display.update()
     pygame.event.pump()
 
     # Wait 1s

@@ -60,49 +60,6 @@ class CvCamera(BaseCamera):
         super(CvCamera, self).__init__(camera_proxy)
         self._overlay_alpha = 255
         self._preview_resolution = None
-        self._use_opencl = False
-
-    def set_hardware_acceleration(self, enabled):
-        super(CvCamera, self).set_hardware_acceleration(enabled)
-        self._use_opencl = False
-        if not cv2 or not hasattr(cv2, 'ocl'):
-            return
-        if not enabled:
-            try:
-                cv2.ocl.setUseOpenCL(False)
-            except AttributeError:
-                pass
-            return
-        try:
-            if cv2.ocl.haveOpenCL():
-                cv2.ocl.setUseOpenCL(True)
-                self._use_opencl = cv2.ocl.useOpenCL()
-        except AttributeError:
-            self._use_opencl = False
-        if enabled:
-            if self._use_opencl:
-                LOGGER.info("OpenCL acceleration enabled for OpenCV camera backend")
-            else:
-                LOGGER.warning("OpenCL acceleration requested for OpenCV camera backend but unavailable")
-
-    def _resize(self, image, size, interpolation=None):
-        if interpolation is None and cv2 is not None:
-            interpolation = cv2.INTER_AREA
-        if self._use_opencl and cv2 is not None:
-            return cv2.resize(cv2.UMat(image), size, interpolation=interpolation).get()
-        if cv2 is None:
-            raise RuntimeError("OpenCV backend is not available")
-        return cv2.resize(image, size, interpolation=interpolation)
-
-    def _cvt_color(self, image, code):
-        if self._use_opencl:
-            return cv2.cvtColor(cv2.UMat(image), code).get()
-        return cv2.cvtColor(image, code)
-
-    def _add_weighted(self, src1, alpha, src2, beta, gamma):
-        if self._use_opencl:
-            return cv2.addWeighted(cv2.UMat(src1), alpha, cv2.UMat(src2), beta, gamma).get()
-        return cv2.addWeighted(src1, alpha, src2, beta, gamma)
 
     def _specific_initialization(self):
         """Camera initialization.
@@ -119,7 +76,7 @@ class CvCamera(BaseCamera):
             self._overlay_alpha = alpha
             pil_image = self.build_overlay((rect.width, rect.height), str(text), 255)
             # Remove alpha from overlay
-            self._overlay = self._cvt_color(np.array(pil_image), cv2.COLOR_RGBA2RGB)
+            self._overlay = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGBA2RGB)
 
     def _rotate_image(self, image, rotation):
         """Rotate an OpenCV image, same direction than RpiCamera.
@@ -144,7 +101,7 @@ class CvCamera(BaseCamera):
             raise IOError("Can not get camera preview image")
         image = self._rotate_image(image, self.preview_rotation)
 
-        image = self._cvt_color(image, cv2.COLOR_BGR2RGB)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         # Crop to keep aspect ratio of the resolution
         height, width = image.shape[:2]
         cropped = sizing.new_size_by_croping_ratio((width, height), self.resolution)
@@ -152,7 +109,7 @@ class CvCamera(BaseCamera):
         # Resize to fit the available space in the window
         height, width = image.shape[:2]
         size = sizing.new_size_keep_aspect_ratio((width, height), (rect.width, rect.height), 'outer')
-        image = self._resize(image, size, interpolation=cv2.INTER_AREA)
+        image = cv2.resize(image, size, interpolation=cv2.INTER_AREA)
 
         if self.preview_flip:
             image = cv2.flip(image, 1)
@@ -160,8 +117,8 @@ class CvCamera(BaseCamera):
         if self._overlay is not None:
             if self._overlay.shape != image.shape:
                 # Previous operations may create a size with one pixel gap
-                self._overlay = self._resize(self._overlay, (image.shape[1], image.shape[0]))
-            image = self._add_weighted(image, 1, self._overlay, self._overlay_alpha / 255., 0)
+                self._overlay = cv2.resize(self._overlay, (image.shape[1], image.shape[0]))
+            image = cv2.addWeighted(image, 1, self._overlay, self._overlay_alpha / 255., 0)
         return Image.fromarray(image)
 
     def _post_process_capture(self, capture_data):
@@ -172,7 +129,7 @@ class CvCamera(BaseCamera):
         """
         frame, effect = capture_data
 
-        image = self._cvt_color(frame, cv2.COLOR_BGR2RGB)
+        image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         # Crop to keep aspect ratio of the resolution
         height, width = image.shape[:2]
         cropped = sizing.new_size_by_croping_ratio((width, height), self.resolution)
@@ -180,7 +137,7 @@ class CvCamera(BaseCamera):
         # Resize to fit the resolution
         height, width = image.shape[:2]
         size = sizing.new_size_keep_aspect_ratio((width, height), self.resolution, 'outer')
-        image = self._resize(image, size, interpolation=cv2.INTER_AREA)
+        image = cv2.resize(image, size, interpolation=cv2.INTER_AREA)
 
         if self.capture_flip:
             image = cv2.flip(image, 1)
@@ -216,7 +173,7 @@ class CvCamera(BaseCamera):
             updated_rect = self._window.show_image(self._get_preview_image())
             pygame.event.pump()
             if updated_rect:
-                self._window.present(updated_rect)
+                pygame.display.update(updated_rect)
 
         self._show_overlay(get_translated_text('smile'), alpha)
         self._window.show_image(self._get_preview_image())
@@ -233,7 +190,7 @@ class CvCamera(BaseCamera):
             updated_rect = self._window.show_image(self._get_preview_image())
             pygame.event.pump()
             if updated_rect:
-                self._window.present(updated_rect)
+                pygame.display.update(updated_rect)
 
         self._show_overlay(get_translated_text('smile'), alpha)
         self._window.show_image(self._get_preview_image())

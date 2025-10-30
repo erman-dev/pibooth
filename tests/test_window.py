@@ -23,7 +23,7 @@ def loop(func, *args, **kwargs):
 
         func(*args, **kwargs)
 
-        WIN.present()
+        pygame.display.update()
         clock.tick(fps)
 
         if os.environ.get('SDL_VIDEODRIVER') == "dummy":

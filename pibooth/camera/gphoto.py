@@ -251,7 +251,7 @@ class GpCamera(BaseCamera):
 
             pygame.event.pump()
             if updated_rect:
-                self._window.present(updated_rect)
+                pygame.display.update(updated_rect)
 
         self._show_overlay(get_translated_text('smile'), alpha)
         self._window.show_image(self._get_preview_image())
@@ -269,7 +269,7 @@ class GpCamera(BaseCamera):
                 updated_rect = self._window.show_image(self._get_preview_image())
                 pygame.event.pump()
                 if updated_rect:
-                    self._window.present(updated_rect)
+                    pygame.display.update(updated_rect)
         else:
             time.sleep(timer.remaining())
 

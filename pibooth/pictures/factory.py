@@ -7,38 +7,16 @@ from pibooth.utils import LOGGER
 from pibooth.pictures import sizing
 from PIL import Image, ImageDraw
 
+try:  # Pillow >=9.1
+    Resampling = Image.Resampling
+except AttributeError:  # pragma: no cover - legacy Pillow fallback
+    Resampling = Image
+
 try:
     import cv2
     import numpy as np
 except ImportError:
     cv2 = None
-
-
-USE_OPENCL = False
-
-
-def configure_opencl(enable):
-    """Enable or disable OpenCL usage for picture factories."""
-    global USE_OPENCL
-    USE_OPENCL = False
-    if not cv2 or not hasattr(cv2, 'ocl'):
-        return USE_OPENCL
-    if not enable:
-        try:
-            cv2.ocl.setUseOpenCL(False)
-        except AttributeError:
-            pass
-        return USE_OPENCL
-    try:
-        if not cv2.ocl.haveOpenCL():
-            return USE_OPENCL
-        cv2.ocl.setUseOpenCL(True)
-        USE_OPENCL = cv2.ocl.useOpenCL()
-    except AttributeError:
-        USE_OPENCL = False
-    if USE_OPENCL:
-        LOGGER.info("OpenCL acceleration enabled for picture compositing")
-    return USE_OPENCL
 
 
 class PictureFactory(object):
@@ -422,11 +400,11 @@ class PilPictureFactory(PictureFactory):
         """
         if crop:
             width, height = sizing.new_size_keep_aspect_ratio(image.size, (max_w, max_h), 'outer')
-            image = image.resize((width, height), Image.ANTIALIAS)
+            image = image.resize((width, height), Resampling.LANCZOS)
             image = image.crop(sizing.new_size_by_croping(image.size, (max_w, max_h)))
         else:
             width, height = sizing.new_size_keep_aspect_ratio(image.size, (max_w, max_h), 'inner')
-            image = image.resize((width, height), Image.ANTIALIAS)
+            image = image.resize((width, height), Resampling.LANCZOS)
         return image, image.size[0], image.size[1]
 
     def _image_paste(self, image, dest_image, pos_x, pos_y):
@@ -463,28 +441,10 @@ class PilPictureFactory(PictureFactory):
 
 class OpenCvPictureFactory(PictureFactory):
 
-    def __init__(self, width, height, *images):
-        super(OpenCvPictureFactory, self).__init__(width, height, *images)
-        self._use_opencl = USE_OPENCL and cv2 is not None
-
-    def _resize(self, array, size, interpolation=None):
-        if interpolation is None and cv2 is not None:
-            interpolation = cv2.INTER_AREA
-        if self._use_opencl and cv2 is not None:
-            return cv2.resize(cv2.UMat(array), size, interpolation=interpolation).get()
-        if cv2 is None:
-            raise RuntimeError("OpenCV backend is not available")
-        return cv2.resize(array, size, interpolation=interpolation)
-
-    def _cvt_color(self, array, code):
-        if self._use_opencl:
-            return cv2.cvtColor(cv2.UMat(array), code).get()
-        return cv2.cvtColor(array, code)
-
     def _image_resize_keep_ratio(self, image, max_w, max_h, crop=False):
         """See upper class description.
         """
-        inter = cv2.INTER_AREA if cv2 else None
+        inter = cv2.INTER_AREA
         height, width = image.shape[:2]
 
         source_aspect_ratio = float(width) / height
@@ -501,10 +461,10 @@ class OpenCvPictureFactory(PictureFactory):
                 x_offset = int((float(width) - w_cropped) / 2)
                 y_offset = 0
                 cropped = image[y_offset:height, x_offset:(x_offset + w_cropped)]
-            image = self._resize(cropped, (max_w, max_h), inter)
+            image = cv2.resize(cropped, (max_w, max_h), interpolation=inter)
         else:
             width, height = sizing.new_size_keep_aspect_ratio((width, height), (max_w, max_h), 'inner')
-            image = self._resize(image, (width, height), interpolation=cv2.INTER_AREA if cv2 else None)
+            image = cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA)
         return image, image.shape[1], image.shape[0]
 
     def _image_paste(self, image, dest_image, pos_x, pos_y):
@@ -523,7 +483,7 @@ class OpenCvPictureFactory(PictureFactory):
         """See upper class description.
         """
         if self._overlay_image:
-            overlay = self._cvt_color(cv2.imread(self._overlay_image, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGBA)
+            overlay = cv2.cvtColor(cv2.imread(self._overlay_image, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGBA)
             overlay, _, _ = self._image_resize_keep_ratio(overlay, self.width, self.height, True)
 
             x, y = 0, 0
@@ -560,7 +520,7 @@ class OpenCvPictureFactory(PictureFactory):
         """See upper class description.
         """
         if self._background_image:
-            bg = self._cvt_color(cv2.imread(self._background_image), cv2.COLOR_BGR2RGB)
+            bg = cv2.cvtColor(cv2.imread(self._background_image), cv2.COLOR_BGR2RGB)
             image, _, _ = self._image_resize_keep_ratio(bg, self.width, self.height, True)
         else:
             # Small optimization for all white or all black (or all grey...) background
