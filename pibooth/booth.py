@@ -88,16 +88,19 @@ class PiApplication(object):
         init_debug = self._config.getboolean('GENERAL', 'debug')
         init_color = self._config.gettyped('WINDOW', 'background')
         init_text_color = self._config.gettyped('WINDOW', 'text_color')
+        init_accel = self._config.get('WINDOW', 'hardware_acceleration')
         if not isinstance(init_color, (tuple, list)):
             init_color = self._config.getpath('WINDOW', 'background')
 
         title = 'Pibooth v{}'.format(pibooth.__version__)
         if not isinstance(init_size, str):
             self._window = PiWindow(title, init_size, color=init_color,
-                                    text_color=init_text_color, debug=init_debug)
+                                    text_color=init_text_color, debug=init_debug,
+                                    hardware_acceleration=init_accel)
         else:
             self._window = PiWindow(title, color=init_color,
-                                    text_color=init_text_color, debug=init_debug)
+                                    text_color=init_text_color, debug=init_debug,
+                                    hardware_acceleration=init_accel)
 
         self._menu = None
         self._multipress_timer = PoolingTimer(config.getfloat('CONTROLS', 'multi_press_delay'), False)
@@ -172,6 +175,13 @@ class PiApplication(object):
         self._window.arrow_offset = self._config.getint('WINDOW', 'arrows_x_offset')
         self._window.text_color = self._config.gettyped('WINDOW', 'text_color')
         self._window.drop_cache()
+        self._window.set_hardware_acceleration(self._config.get('WINDOW', 'hardware_acceleration'))
+
+        # Configure picture factory acceleration
+        from pibooth.pictures import factory as picture_factory
+        use_opencl = self._config.getboolean('PICTURE', 'opencl')
+        if not picture_factory.configure_opencl(use_opencl) and use_opencl:
+            LOGGER.warning("OpenCL acceleration requested for pictures but unavailable")
 
         # Handle window size
         size = self._config.gettyped('WINDOW', 'size')
@@ -401,7 +411,7 @@ class PiApplication(object):
                 else:
                     self._machine.process(events)
 
-                pygame.display.update()
+                self._window.present()
                 clock.tick(fps)  # Ensure the program will never run at more than <fps> frames per second
 
         except Exception as ex:

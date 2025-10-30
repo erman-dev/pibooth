@@ -21,6 +21,7 @@ class BaseCamera(object):
         self.preview_rotation, self.capture_rotation = (0, 0)
         self.preview_iso, self.capture_iso = (100, 100)
         self.preview_flip, self.capture_flip = (False, False)
+        self.hardware_acceleration = False
 
     def initialize(self, iso, resolution, rotation=0, flip=False, delete_internal_memory=False):
         """Initialize the camera.
@@ -45,6 +46,10 @@ class BaseCamera(object):
         """Specific camera initialization.
         """
         pass
+
+    def set_hardware_acceleration(self, enabled):
+        """Enable or disable hardware acceleration for the camera backend."""
+        self.hardware_acceleration = bool(enabled)
 
     def _show_overlay(self, text, alpha):
         """Add an image as an overlay.

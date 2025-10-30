@@ -14,6 +14,11 @@ from pibooth.view import background
 from pibooth.utils import LOGGER
 from pibooth.pictures import sizing
 
+try:  # Optional OpenGL support
+    from OpenGL import GL
+except Exception:  # pragma: no cover - optional dependency not installed on CI
+    GL = None
+
 
 class PiWindow(object):
 
@@ -39,13 +44,18 @@ class PiWindow(object):
                  text_color=(255, 255, 255),
                  arrow_location=background.ARROW_BOTTOM,
                  arrow_offset=0,
-                 debug=False):
+                 debug=False,
+                 hardware_acceleration='auto'):
         self.__size = size
         self.debug = debug
         self.bg_color = color
         self.text_color = text_color
         self.arrow_location = arrow_location
         self.arrow_offset = arrow_offset
+        self._hardware_acceleration = (hardware_acceleration or 'auto').lower()
+        self._use_opengl = False
+        self._gl_renderer = None
+        self._screen_surface = None
 
         # Prepare the pygame module for use
         if 'SDL_VIDEO_WINDOW_POS' not in os.environ:
@@ -61,7 +71,7 @@ class PiWindow(object):
         pygame.display.set_caption(title)
         self.is_fullscreen = False
         self.display_size = (info.current_w, info.current_h)
-        self.surface = pygame.display.set_mode(self.__size, pygame.RESIZABLE)
+        self._initialize_display()
 
         self._buffered_images = {}
         self._current_background = None
@@ -81,6 +91,39 @@ class PiWindow(object):
                          127, 128, 124, 0, 108, 0, 70, 0, 6, 0, 3, 0, 3, 0, 0, 0),
                         (192, 0, 224, 0, 240, 0, 248, 0, 252, 0, 254, 0, 255, 0, 255,
                          128, 255, 192, 255, 224, 254, 0, 239, 0, 207, 0, 135, 128, 7, 128, 3, 0))
+
+    def _initialize_display(self):
+        """Initialize display surface depending on the selected backend."""
+        flags = pygame.RESIZABLE
+        desired_backend = (self._hardware_acceleration or 'auto').lower()
+        try_opengl = desired_backend in ('auto', 'opengl') and GL is not None
+
+        if self._use_opengl and self._gl_renderer:
+            try:
+                self._gl_renderer.dispose()
+            except Exception:  # pragma: no cover - defensive
+                pass
+            self._gl_renderer = None
+        self._use_opengl = False
+
+        if try_opengl:
+            try:
+                self._screen_surface = pygame.display.set_mode(
+                    self.__size, pygame.OPENGL | pygame.DOUBLEBUF | flags)
+                self._use_opengl = True
+                self.surface = pygame.Surface(self.__size, pygame.SRCALPHA, 32).convert_alpha()
+                self._gl_renderer = _OpenGLRenderer(self.__size)
+                LOGGER.info("OpenGL hardware acceleration enabled for PiWindow")
+                return
+            except Exception as exc:  # pragma: no cover - depends on runtime env
+                LOGGER.warning("OpenGL acceleration unavailable (%s), falling back to software", exc)
+                self._use_opengl = False
+                self._gl_renderer = None
+
+        self._screen_surface = pygame.display.set_mode(self.__size, flags)
+        self.surface = self._screen_surface
+        if desired_backend == 'opengl' and not self._use_opengl:
+            LOGGER.warning("OpenGL requested but could not be initialized, using software renderer")
 
     def _update_foreground(self, pil_image, pos=CENTER, resize=True):
         """Show a PIL image on the foreground.
@@ -222,7 +265,15 @@ class PiWindow(object):
         """
         if not self.is_fullscreen:
             self.__size = size  # Manual resizing
-            self.surface = pygame.display.set_mode(self.__size, pygame.RESIZABLE)
+            if self._use_opengl:
+                self._screen_surface = pygame.display.set_mode(
+                    self.__size, pygame.OPENGL | pygame.DOUBLEBUF | pygame.RESIZABLE)
+                self.surface = pygame.Surface(self.__size, pygame.SRCALPHA, 32).convert_alpha()
+                if self._gl_renderer:
+                    self._gl_renderer.resize(self.__size)
+            else:
+                self.surface = pygame.display.set_mode(self.__size, pygame.RESIZABLE)
+                self._screen_surface = self.surface
         self.update()
 
     def update(self):
@@ -235,6 +286,7 @@ class PiWindow(object):
             self._update_print_number()
         if self._current_foreground:
             self._update_foreground(*self._current_foreground)
+        self.present()
 
     def show_oops(self):
         """Show failure view in case of exception.
@@ -321,17 +373,17 @@ class PiWindow(object):
                 # Flash only the background, keep foreground at the top
                 self._update_foreground(*self._current_foreground)
             pygame.event.pump()
-            pygame.display.update()
+            self.present()
             time.sleep(0.02)
             if i == count - 1:
                 yield  # Let's do actions before end of flash
                 self.update()
                 pygame.event.pump()
-                pygame.display.update()
+                self.present()
             else:
                 self.update()
                 pygame.event.pump()
-                pygame.display.update()
+                self.present()
                 time.sleep(0.02)
 
     def set_capture_number(self, current_nbr, total_nbr):
@@ -344,7 +396,7 @@ class PiWindow(object):
         self._update_background(background.CaptureBackground())
         if self._current_foreground:
             self._update_foreground(*self._current_foreground)
-        pygame.display.update()
+        self.present()
 
     def set_print_number(self, current_nbr=None, failure=None):
         """Set the current number of tasks in the printer queue.
@@ -363,7 +415,7 @@ class PiWindow(object):
             self._update_background(self._current_background)
             if self._current_foreground:
                 self._update_foreground(*self._current_foreground)
-            pygame.display.update()
+            self.present()
 
     def toggle_fullscreen(self):
         """Set window to full screen or initial size.
@@ -371,13 +423,29 @@ class PiWindow(object):
         if self.is_fullscreen:
             self.is_fullscreen = False  # Set before resize
             pygame.mouse.set_cursor(*self._cursor)
-            self.surface = pygame.display.set_mode(self.__size, pygame.RESIZABLE)
+            if self._use_opengl:
+                self._screen_surface = pygame.display.set_mode(
+                    self.__size, pygame.OPENGL | pygame.DOUBLEBUF | pygame.RESIZABLE)
+                self.surface = pygame.Surface(self.__size, pygame.SRCALPHA, 32).convert_alpha()
+                if self._gl_renderer:
+                    self._gl_renderer.resize(self.__size)
+            else:
+                self.surface = pygame.display.set_mode(self.__size, pygame.RESIZABLE)
+                self._screen_surface = self.surface
         else:
             self.is_fullscreen = True  # Set before resize
             # Make an invisible cursor (don't use pygame.mouse.set_visible(False) because
             # the mouse event will always return the window bottom-right coordinate)
             pygame.mouse.set_cursor((8, 8), (0, 0), (0, 0, 0, 0, 0, 0, 0, 0), (0, 0, 0, 0, 0, 0, 0, 0))
-            self.surface = pygame.display.set_mode(self.display_size, pygame.FULLSCREEN)
+            if self._use_opengl:
+                self._screen_surface = pygame.display.set_mode(
+                    self.display_size, pygame.OPENGL | pygame.DOUBLEBUF | pygame.FULLSCREEN)
+                self.surface = pygame.Surface(self.display_size, pygame.SRCALPHA, 32).convert_alpha()
+                if self._gl_renderer:
+                    self._gl_renderer.resize(self.display_size)
+            else:
+                self.surface = pygame.display.set_mode(self.display_size, pygame.FULLSCREEN)
+                self._screen_surface = self.surface
 
         self.update()
 
@@ -388,3 +456,88 @@ class PiWindow(object):
         self._current_background = None
         self._current_foreground = None
         self._buffered_images = {}
+
+    def set_hardware_acceleration(self, mode):
+        """Switch hardware acceleration backend at runtime."""
+        mode = (mode or 'auto').lower()
+        if mode == self._hardware_acceleration:
+            return
+        was_fullscreen = self.is_fullscreen
+        self._hardware_acceleration = mode
+        if was_fullscreen:
+            # Leave fullscreen to recreate the context at the correct size
+            self.is_fullscreen = False
+        self._initialize_display()
+        if was_fullscreen:
+            self.toggle_fullscreen()
+        else:
+            self.update()
+
+    def present(self, rect=None):
+        """Present the current window content on screen."""
+        if self._use_opengl and self._gl_renderer:
+            self._gl_renderer.upload(self.surface)
+            self._gl_renderer.draw()
+        else:
+            pygame.display.update(rect)
+
+
+class _OpenGLRenderer(object):
+
+    """Minimal OpenGL renderer used to blit pygame surfaces as textures."""
+
+    def __init__(self, size):
+        if GL is None:  # pragma: no cover - guard against optional dependency
+            raise RuntimeError("PyOpenGL is not available")
+        self._texture = GL.glGenTextures(1)
+        self.resize(size)
+        self._initialize_state()
+
+    def _initialize_state(self):  # pragma: no cover - depends on GL runtime
+        GL.glEnable(GL.GL_TEXTURE_2D)
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        GL.glMatrixMode(GL.GL_PROJECTION)
+        GL.glLoadIdentity()
+        GL.glMatrixMode(GL.GL_MODELVIEW)
+        GL.glLoadIdentity()
+
+    def resize(self, size):  # pragma: no cover - depends on GL runtime
+        self._size = size
+        GL.glViewport(0, 0, size[0], size[1])
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self._texture)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP)
+        GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA, size[0], size[1], 0,
+                        GL.GL_RGBA, GL.GL_UNSIGNED_BYTE, None)
+
+    def upload(self, surface):  # pragma: no cover - depends on GL runtime
+        if surface.get_size() != self._size:
+            self.resize(surface.get_size())
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self._texture)
+        raw = pygame.image.tostring(surface, "RGBA", True)
+        GL.glTexSubImage2D(GL.GL_TEXTURE_2D, 0, 0, 0,
+                           surface.get_width(), surface.get_height(),
+                           GL.GL_RGBA, GL.GL_UNSIGNED_BYTE, raw)
+
+    def draw(self):  # pragma: no cover - depends on GL runtime
+        GL.glClearColor(0.0, 0.0, 0.0, 1.0)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self._texture)
+        GL.glBegin(GL.GL_QUADS)
+        GL.glTexCoord2f(0.0, 0.0)
+        GL.glVertex2f(-1.0, 1.0)
+        GL.glTexCoord2f(1.0, 0.0)
+        GL.glVertex2f(1.0, 1.0)
+        GL.glTexCoord2f(1.0, 1.0)
+        GL.glVertex2f(1.0, -1.0)
+        GL.glTexCoord2f(0.0, 1.0)
+        GL.glVertex2f(-1.0, -1.0)
+        GL.glEnd()
+        pygame.display.flip()
+
+    def dispose(self):  # pragma: no cover - depends on GL runtime
+        if self._texture and GL is not None:
+            GL.glDeleteTextures(int(self._texture))
+            self._texture = None
