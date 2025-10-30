@@ -36,6 +36,16 @@ INSTRUCTION_DEFAULTS = {
 }
 
 
+def _mix_colors(base, accent, ratio):
+    """Return the color obtained by mixing ``base`` and ``accent``."""
+
+    ratio = max(0.0, min(float(ratio), 1.0))
+    return tuple(
+        int(round(base[i] + (accent[i] - base[i]) * ratio))
+        for i in range(3)
+    )
+
+
 def get_instruction_text(purpose, location):
     """Return a translated instruction text for the given purpose/location."""
     if location == ARROW_HIDDEN:
@@ -109,12 +119,18 @@ class Background(object):
 
         self._texts = []  # List of (surface, rect)
         self._instructions = []  # List of (surface, rect)
+        self._text_panels = []  # List of (surface, rect)
+        self._instruction_panels = []  # List of (surface, rect)
         self._text_border = 20  # Distance to other elements
         self._text_color = text_color
 
         # Build rectangles around some areas for debuging purpose
-        self._show_outlines = True
+        self._show_outlines = False
         self._outlines = []
+
+        self._panel_padding = 40
+        self._panel_radius = 28
+        self._panel_alpha = 180
 
     def __str__(self):
         """Return background final name.
@@ -138,7 +154,64 @@ class Background(object):
             rect = self._rect.inflate(-self._text_border, -self._text_border)
         if self._show_outlines:
             self._outlines.append((self._make_outlines(rect.size), rect))
-        self._texts.extend(multiline_text_to_surfaces(text, self._text_color, rect, align))
+        surfaces = multiline_text_to_surfaces(text, self._text_color, rect, align)
+        self._record_text_block(surfaces, rect, self._text_panels, emphasis=False)
+        self._texts.extend(surfaces)
+
+    def _record_text_block(self, surfaces, container_rect, panel_list, emphasis=False):
+        if not surfaces:
+            return
+
+        block_rect = surfaces[0][1].copy()
+        for _, surface_rect in surfaces[1:]:
+            block_rect.union_ip(surface_rect)
+
+        if self._rect:
+            left_room = max(0, block_rect.left - self._rect.left)
+            right_room = max(0, self._rect.right - block_rect.right)
+            top_room = max(0, block_rect.top - self._rect.top)
+            bottom_room = max(0, self._rect.bottom - block_rect.bottom)
+        else:
+            left_room = right_room = top_room = bottom_room = self._panel_padding
+
+        left_pad = min(self._panel_padding, left_room)
+        right_pad = min(self._panel_padding, right_room)
+        top_pad = min(self._panel_padding, top_room)
+        bottom_pad = min(self._panel_padding, bottom_room)
+
+        expanded = pygame.Rect(
+            block_rect.left - left_pad,
+            block_rect.top - top_pad,
+            block_rect.width + left_pad + right_pad,
+            block_rect.height + top_pad + bottom_pad,
+        )
+
+        panel_surface = self._build_panel_surface(expanded.size, emphasis)
+        panel_list.append((panel_surface, expanded.topleft))
+
+    def _add_instruction_text(self, text, rect, align):
+        surfaces = multiline_text_to_surfaces(text, self._text_color, rect, align)
+        self._record_text_block(surfaces, rect, self._instruction_panels, emphasis=True)
+        self._instructions.extend(surfaces)
+
+    def _build_panel_surface(self, size, emphasis=False):
+        fill_ratio = 0.30 if emphasis else 0.22
+        border_ratio = 0.45 if emphasis else 0.35
+
+        fill_rgb = _mix_colors(self._background_color, self._text_color, fill_ratio)
+        border_rgb = _mix_colors(self._background_color, self._text_color, border_ratio)
+
+        panel = pygame.Surface(size, pygame.SRCALPHA)
+        rect = panel.get_rect()
+
+        fill_color = (*fill_rgb, self._panel_alpha)
+        border_alpha = min(255, int(self._panel_alpha * 0.85))
+        border_color = (*border_rgb, border_alpha)
+
+        pygame.draw.rect(panel, fill_color, rect, border_radius=self._panel_radius)
+        pygame.draw.rect(panel, border_color, rect, width=2, border_radius=self._panel_radius)
+
+        return panel
 
     def set_color(self, color_or_path):
         """Set background color (RGB tuple) or path to an image that used to
@@ -211,6 +284,8 @@ class Background(object):
         """
         self._texts = []
         self._instructions = []
+        self._text_panels = []
+        self._instruction_panels = []
         text = get_translated_text(self._name)
         if text:
             self._write_text(text, rect, align)
@@ -224,6 +299,10 @@ class Background(object):
             screen.fill(self._background_color)
         if self._overlay:
             screen.blit(self._overlay, self._overlay.get_rect(center=self._rect.center))
+        for panel_surface, pos in self._text_panels:
+            screen.blit(panel_surface, pos)
+        for panel_surface, pos in self._instruction_panels:
+            screen.blit(panel_surface, pos)
         for text_surface, pos in self._texts:
             screen.blit(text_surface, pos)
         for text_surface, pos in self._instructions:
@@ -295,11 +374,9 @@ class IntroBackground(Background):
             left_align = 'bottom-center'
 
         if confirm_text:
-            self._instructions.extend(
-                multiline_text_to_surfaces(confirm_text, self._text_color, right_rect, right_align))
+            self._add_instruction_text(confirm_text, right_rect, right_align)
         if skip_text:
-            self._instructions.extend(
-                multiline_text_to_surfaces(skip_text, self._text_color, left_rect, left_align))
+            self._add_instruction_text(skip_text, left_rect, left_align)
 
     def resize_texts(self):
         """Update text surfaces.
@@ -329,8 +406,7 @@ class IntroBackground(Background):
             instruction = get_instruction_text('continue', self.arrow_location)
             if instruction:
                 rect, align = self._get_instruction_area()
-                self._instructions.extend(
-                    multiline_text_to_surfaces(instruction, self._text_color, rect, align))
+                self._add_instruction_text(instruction, rect, align)
 
 
 class IntroWithPrintBackground(IntroBackground):
@@ -384,8 +460,7 @@ class IntroWithPrintBackground(IntroBackground):
             instruction = get_instruction_text('print', self.arrow_location)
             if instruction:
                 rect, align = self._get_print_instruction_area()
-                self._instructions.extend(
-                    multiline_text_to_surfaces(instruction, self._text_color, rect, align))
+                self._add_instruction_text(instruction, rect, align)
 
 
 class ChooseBackground(Background):
@@ -399,6 +474,7 @@ class ChooseBackground(Background):
         self.layout0_pos = None
         self.layout1 = None
         self.layout1_pos = None
+        self.choice_panels = []
 
     def resize(self, screen):
         Background.resize(self, screen)
@@ -417,6 +493,13 @@ class ChooseBackground(Background):
 
             self.layout0_pos = (x0, y)
             self.layout1_pos = (x1, y)
+            self.choice_panels = []
+
+            padding = int(min(self.layout0.get_width(), self.layout0.get_height()) * 0.08)
+            layout_rect0 = self.layout0.get_rect(topleft=self.layout0_pos).inflate(padding, padding)
+            layout_rect1 = self.layout1.get_rect(topleft=self.layout1_pos).inflate(padding, padding)
+            self.choice_panels.append((self._build_panel_surface(layout_rect0.size, emphasis=True), layout_rect0.topleft))
+            self.choice_panels.append((self._build_panel_surface(layout_rect1.size, emphasis=True), layout_rect1.topleft))
             self._build_choice_instructions()
 
     def _build_choice_instructions(self):
@@ -445,8 +528,7 @@ class ChooseBackground(Background):
                 hint_rect.top = rect.bottom + self._text_border
                 align = 'top-center'
 
-            self._instructions.extend(
-                multiline_text_to_surfaces(instruction, self._text_color, hint_rect, align))
+            self._add_instruction_text(instruction, hint_rect, align)
 
     def resize_texts(self):
         """Update text surfaces.
@@ -457,6 +539,8 @@ class ChooseBackground(Background):
 
     def paint(self, screen):
         Background.paint(self, screen)
+        for panel, pos in self.choice_panels:
+            screen.blit(panel, pos)
         screen.blit(self.layout0, self.layout0_pos)
         screen.blit(self.layout1, self.layout1_pos)
 
@@ -592,11 +676,9 @@ class PrintBackground(Background):
             left_align = 'bottom-center'
 
         if confirm_text:
-            self._instructions.extend(
-                multiline_text_to_surfaces(confirm_text, self._text_color, right_rect, right_align))
+            self._add_instruction_text(confirm_text, right_rect, right_align)
         if skip_text:
-            self._instructions.extend(
-                multiline_text_to_surfaces(skip_text, self._text_color, left_rect, left_align))
+            self._add_instruction_text(skip_text, left_rect, left_align)
 
     def resize_texts(self):
         """Update text surfaces.
