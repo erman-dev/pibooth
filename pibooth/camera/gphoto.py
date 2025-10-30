@@ -130,7 +130,7 @@ class GpCamera(BaseCamera):
             image = Image.open(io.BytesIO(cam_file.get_data_and_size()))
             image = self._rotate_image(image, self.preview_rotation)
             # Crop to keep aspect ratio of the resolution
-            image = image.crop(sizing.new_size_by_croping_ratio(image.size, self.resolution))
+            image = image.crop(sizing.new_size_by_croping_ratio(image.size, self.preview_resolution))
             # Resize to fit the available space in the window
             image = image.resize(sizing.new_size_keep_aspect_ratio(image.size, (rect.width, rect.height), 'outer'))
 
@@ -158,9 +158,9 @@ class GpCamera(BaseCamera):
         image = self._rotate_image(image, self.capture_rotation)
 
         # Crop to keep aspect ratio of the resolution
-        image = image.crop(sizing.new_size_by_croping_ratio(image.size, self.resolution))
+        image = image.crop(sizing.new_size_by_croping_ratio(image.size, self.capture_resolution))
         # Resize to fit the resolution
-        image = image.resize(sizing.new_size_keep_aspect_ratio(image.size, self.resolution, 'outer'))
+        image = image.resize(sizing.new_size_keep_aspect_ratio(image.size, self.capture_resolution, 'outer'))
 
         if self.capture_flip:
             image = image.transpose(Image.FLIP_LEFT_RIGHT)

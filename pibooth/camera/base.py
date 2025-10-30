@@ -17,12 +17,15 @@ class BaseCamera(object):
         self._captures = []
 
         self.resolution = None
+        self.capture_resolution = None
+        self.preview_resolution = None
         self.delete_internal_memory = False
         self.preview_rotation, self.capture_rotation = (0, 0)
         self.preview_iso, self.capture_iso = (100, 100)
         self.preview_flip, self.capture_flip = (False, False)
 
-    def initialize(self, iso, resolution, rotation=0, flip=False, delete_internal_memory=False):
+    def initialize(self, iso, resolution, preview_resolution=None, rotation=0, flip=False,
+                   delete_internal_memory=False):
         """Initialize the camera.
         """
         if not isinstance(rotation, (tuple, list)):
@@ -33,7 +36,18 @@ class BaseCamera(object):
             if rotation not in (0, 90, 180, 270):
                 raise ValueError(
                     "Invalid {} camera rotation value '{}' (should be 0, 90, 180 or 270)".format(name, rotation))
-        self.resolution = resolution
+        if not isinstance(resolution, (tuple, list)) or len(resolution) != 2:
+            raise ValueError("Invalid capture resolution '{}', expected a (width, height) tuple".format(resolution))
+
+        if preview_resolution in (None, (), []):
+            preview_resolution = resolution
+        elif not isinstance(preview_resolution, (tuple, list)) or len(preview_resolution) != 2:
+            raise ValueError("Invalid preview resolution '{}', expected a (width, height) tuple".format(
+                preview_resolution))
+
+        self.capture_resolution = tuple(int(v) for v in resolution)
+        self.preview_resolution = tuple(int(v) for v in preview_resolution)
+        self.resolution = self.capture_resolution  # Backward compatibility for plugins
         self.capture_flip = flip
         if not isinstance(iso, (tuple, list)):
             iso = (iso, iso)
@@ -70,7 +84,7 @@ class BaseCamera(object):
         size = (rect.width - 2 * self._border, rect.height - 2 * self._border)
         if max_size:
             size = (min(size[0], max_size[0]), min(size[1], max_size[1]))
-        res = sizing.new_size_keep_aspect_ratio(self.resolution, size)
+        res = sizing.new_size_keep_aspect_ratio(self.preview_resolution, size)
         return pygame.Rect(rect.centerx - res[0] // 2, rect.centery - res[1] // 2, res[0], res[1])
 
     def build_overlay(self, size, text, alpha):

@@ -99,8 +99,10 @@ The ``pibooth`` application handle the rendering of the final picture using 2
 variables defined in the configuration (see :ref:`Configure` below):
 
 * ``[CAMERA][resolution] = (width, height)`` is the resolution of the captured
-  picture in pixels. As explained in the configuration file, the preview size is
-  directly dependent from this parameter.
+  picture in pixels.
+* ``[CAMERA][preview_resolution] = (width, height)`` optionally controls the
+  resolution of the live preview. When left empty, the preview keeps the same
+  aspect ratio as the capture resolution.
 * ``[PICTURE][orientation] = auto/landscape/portrait`` is the orientation of the
   final picture (after concatenation of all captures). If the value is **auto**,
   the orientation is automatically chosen depending on the resolution.

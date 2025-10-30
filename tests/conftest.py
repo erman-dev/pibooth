@@ -13,6 +13,7 @@ from pibooth.camera import RpiCamera, GpCamera, CvCamera, HybridRpiCamera, Hybri
 
 ISO = 100
 RESOLUTION = (1934, 2464)
+PREVIEW_RESOLUTION = RESOLUTION
 MOCKS_DIR = os.path.join(os.path.dirname(__file__), 'mocks')
 CAPTURES_DIR = os.path.join(os.path.dirname(__file__), 'captures')
 
@@ -78,7 +79,7 @@ def proxy_rpi():
 @pytest.fixture(scope='session')
 def camera_rpi(proxy_rpi):
     cam = RpiCamera(proxy_rpi)
-    cam.initialize(ISO, RESOLUTION, delete_internal_memory=True)
+    cam.initialize(ISO, RESOLUTION, preview_resolution=PREVIEW_RESOLUTION, delete_internal_memory=True)
     yield cam
     cam.quit()
 
@@ -86,7 +87,7 @@ def camera_rpi(proxy_rpi):
 @pytest.fixture(scope='session')
 def camera_rpi_gp(proxy_rpi, proxy_gp):
     cam = HybridRpiCamera(proxy_rpi, proxy_gp)
-    cam.initialize(ISO, RESOLUTION, delete_internal_memory=True)
+    cam.initialize(ISO, RESOLUTION, preview_resolution=PREVIEW_RESOLUTION, delete_internal_memory=True)
     yield cam
     cam.quit()
 
@@ -99,7 +100,7 @@ def proxy_cv():
 @pytest.fixture(scope='session')
 def camera_cv(proxy_cv):
     cam = CvCamera(proxy_cv)
-    cam.initialize(ISO, RESOLUTION, delete_internal_memory=True)
+    cam.initialize(ISO, RESOLUTION, preview_resolution=PREVIEW_RESOLUTION, delete_internal_memory=True)
     yield cam
     cam.quit()
 
@@ -107,7 +108,7 @@ def camera_cv(proxy_cv):
 @pytest.fixture(scope='session')
 def camera_cv_gp(proxy_cv, proxy_gp):
     cam = HybridCvCamera(proxy_cv, proxy_gp)
-    cam.initialize(ISO, RESOLUTION, delete_internal_memory=True)
+    cam.initialize(ISO, RESOLUTION, preview_resolution=PREVIEW_RESOLUTION, delete_internal_memory=True)
     yield cam
     cam.quit()
 
@@ -120,6 +121,6 @@ def proxy_gp():
 @pytest.fixture(scope='session')
 def camera_gp(proxy_gp):
     cam = GpCamera(proxy_gp)
-    cam.initialize(ISO, RESOLUTION, delete_internal_memory=True)
+    cam.initialize(ISO, RESOLUTION, preview_resolution=PREVIEW_RESOLUTION, delete_internal_memory=True)
     yield cam
     cam.quit()
